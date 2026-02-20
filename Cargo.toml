@@ -13,3 +13,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[[example]]
+name = "bench_compare"
+path = "bench-compare/bench_rust.rs"

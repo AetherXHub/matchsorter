@@ -1,0 +1,9 @@
+{
+  "name": "matchsorter-bench-compare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "match-sorter": "^6.3.4"
+  }
+}
