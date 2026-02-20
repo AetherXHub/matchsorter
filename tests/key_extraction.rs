@@ -4,7 +4,9 @@
 //! Tests use a realistic `User` struct with `name`, `email`, and `tags`
 //! fields, exercising the public API exported from `matchsorter`.
 
-use matchsorter::{Key, MatchSorterOptions, Ranking, get_highest_ranking, get_item_values, rank_item};
+use matchsorter::{
+    Key, MatchSorterOptions, Ranking, get_highest_ranking, get_item_values, rank_item,
+};
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -27,7 +29,7 @@ fn sample_user() -> User {
 }
 
 /// Shorthand for default options (strip diacritics).
-fn default_opts() -> MatchSorterOptions {
+fn default_opts() -> MatchSorterOptions<User> {
     MatchSorterOptions::default()
 }
 

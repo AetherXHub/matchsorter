@@ -86,7 +86,7 @@ pub fn get_highest_ranking<T>(
     item: &T,
     keys: &[Key<T>],
     query: &str,
-    options: &MatchSorterOptions,
+    options: &MatchSorterOptions<T>,
 ) -> RankingInfo {
     let mut best = RankingInfo {
         rank: Ranking::NoMatch,
@@ -781,7 +781,7 @@ mod tests {
 
     // --- get_highest_ranking tests ---
 
-    fn default_opts() -> MatchSorterOptions {
+    fn default_opts<T>() -> MatchSorterOptions<T> {
         MatchSorterOptions::default()
     }
 
@@ -992,12 +992,14 @@ mod tests {
 
         let opts_strip = MatchSorterOptions {
             keep_diacritics: false,
+            ..Default::default()
         };
         let info_strip = get_highest_ranking(&item, &keys, "cafe", &opts_strip);
         assert_eq!(info_strip.rank, Ranking::CaseSensitiveEqual);
 
         let opts_keep = MatchSorterOptions {
             keep_diacritics: true,
+            ..Default::default()
         };
         let info_keep = get_highest_ranking(&item, &keys, "cafe", &opts_keep);
         assert_eq!(info_keep.rank, Ranking::NoMatch);

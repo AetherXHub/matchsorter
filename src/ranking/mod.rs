@@ -125,8 +125,8 @@ impl PartialOrd for Ranking {
 /// # Returns
 ///
 /// - [`Ranking::NoMatch`] if any query character cannot be found in order
-/// - [`Ranking::Matches(2.0)`] when `spread == 0` (single-character query)
-/// - [`Ranking::Matches(1.0 + 1.0 / spread)`] otherwise, where `spread` is
+/// - `Ranking::Matches(2.0)` when `spread == 0` (single-character query)
+/// - `Ranking::Matches(1.0 + 1.0 / spread)` otherwise, where `spread` is
 ///   the distance (in char positions) between the first and last matched
 ///   characters. The result is always in the range `(1.0, 2.0]`.
 ///
