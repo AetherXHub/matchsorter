@@ -2,6 +2,14 @@
 name = "matchsorter"
 version = "0.1.0"
 edition = "2024"
+description = "Fuzzy string matching and sorting, inspired by match-sorter"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["fuzzy", "search", "filter", "sort", "match"]
+categories = ["algorithms", "text-processing"]
+repository = "https://github.com/AetherXHub/matchsorter"
+homepage = "https://github.com/AetherXHub/matchsorter"
+exclude = ["bench-compare/", "docs/", ".claude/"]
 
 [dependencies]
 unicode-normalization = "0.1"

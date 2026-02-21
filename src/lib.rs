@@ -1,10 +1,31 @@
 #![warn(missing_docs)]
 
-//! A fuzzy string matching and sorting library.
+//! Fuzzy string matching and sorting, inspired by Kent C. Dodds'
+//! [match-sorter](https://github.com/kentcdodds/match-sorter) for JavaScript.
 //!
-//! `matchsorter` ranks candidate strings against a search query using an 8-tier
-//! ranking system, providing both exact and fuzzy matching with optional
-//! diacritics normalization.
+//! `matchsorter` ranks candidate strings against a search query using an
+//! **8-tier ranking system**, then returns them sorted from best to worst
+//! match. It handles everything from exact case-sensitive equality down to
+//! fuzzy character-by-character matching, with optional diacritics
+//! normalization, key extraction for structs, and per-key ranking controls.
+//!
+//! # Ranking Tiers
+//!
+//! Every candidate is classified into one of 8 tiers, checked in order from
+//! best to worst. The first matching tier is returned.
+//!
+//! | Tier | Name | Example (query `"app"`) |
+//! |------|------|-------------------------|
+//! | 7 | **CaseSensitiveEqual** | `"app"` matches `"app"` exactly |
+//! | 6 | **Equal** | `"app"` matches `"APP"` (case-insensitive) |
+//! | 5 | **StartsWith** | `"app"` matches `"apple"` |
+//! | 4 | **WordStartsWith** | `"app"` matches `"pine apple"` (word boundary) |
+//! | 3 | **Contains** | `"app"` matches `"pineapple"` (substring) |
+//! | 2 | **Acronym** | `"nwa"` matches `"North-West Airlines"` |
+//! | 1..2 | **Matches** | `"plgnd"` fuzzy-matches `"playground"` |
+//! | 0 | **NoMatch** | No match found |
+//!
+//! See [`Ranking`] for full details on each tier and the `Matches` sub-score.
 //!
 //! # Quick Start
 //!
@@ -15,6 +36,64 @@
 //! let results = match_sorter(&items, "ap", MatchSorterOptions::default());
 //! assert_eq!(results[0], &"apple");
 //! ```
+//!
+//! # Keys Mode
+//!
+//! Match against struct fields by providing [`Key`] extractors:
+//!
+//! ```
+//! use matchsorter::{match_sorter, MatchSorterOptions, AsMatchStr};
+//! use matchsorter::key::Key;
+//!
+//! struct User { name: String, email: String }
+//!
+//! impl AsMatchStr for User {
+//!     fn as_match_str(&self) -> &str { &self.name }
+//! }
+//!
+//! let users = vec![
+//!     User { name: "Alice".into(), email: "alice@example.com".into() },
+//!     User { name: "Bob".into(),   email: "bob@example.com".into() },
+//! ];
+//!
+//! let opts = MatchSorterOptions {
+//!     keys: vec![
+//!         Key::from_fn(|u: &User| u.name.as_str()),
+//!         Key::from_fn(|u: &User| u.email.as_str()),
+//!     ],
+//!     ..Default::default()
+//! };
+//!
+//! let results = match_sorter(&users, "ali", opts);
+//! assert_eq!(results[0].name, "Alice");
+//! ```
+//!
+//! # Custom Threshold
+//!
+//! Exclude fuzzy-only matches by raising the threshold:
+//!
+//! ```
+//! use matchsorter::{match_sorter, MatchSorterOptions, Ranking};
+//!
+//! let items = ["apple", "banana", "playground"];
+//! let opts = MatchSorterOptions {
+//!     threshold: Ranking::Contains,
+//!     ..Default::default()
+//! };
+//! let results = match_sorter(&items, "pl", opts);
+//! assert_eq!(results.len(), 2);
+//! ```
+//!
+//! # Feature Highlights
+//!
+//! - **8-tier ranking** from exact match to fuzzy character matching
+//! - **Diacritics normalization** -- `"cafe"` matches `"cafe"` by default
+//! - **Key extraction** -- [`Key::new`](key::Key::new),
+//!   [`Key::from_fn`](key::Key::from_fn), [`Key::from_fn_multi`](key::Key::from_fn_multi)
+//! - **Per-key controls** -- `threshold`, `min_ranking`, `max_ranking`
+//! - **Custom sorting** -- replace the tiebreaker or the entire sort
+//! - **Zero-copy no-keys mode** -- `&str`, `String`, `Cow<str>` via [`AsMatchStr`]
+//! - **SIMD-accelerated** substring search via `memchr`
 
 /// Ranking algorithm for scoring how well a candidate string matches a query.
 pub mod ranking;
