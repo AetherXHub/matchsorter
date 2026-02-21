@@ -1,6 +1,6 @@
 # PRD-004: Performance Hot-Path Optimizations
 
-**Status:** DRAFT
+**Status:** TICKETS READY
 **Created:** 2026-02-20
 **Author:** PRD Writer Agent
 

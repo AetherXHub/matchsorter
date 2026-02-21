@@ -201,7 +201,10 @@ where
         Some(memchr::memmem::Finder::new(pq.lower.as_bytes()))
     };
     // Reusable buffer for lowercasing each candidate (avoids per-item allocation).
-    let mut candidate_buf = String::new();
+    // Pre-allocate with `value.len().max(32)` so the first `lowercase_into` call
+    // does not trigger a grow-from-zero reallocation; 32 bytes covers most short
+    // candidates while `value.len()` scales for longer queries.
+    let mut candidate_buf = String::with_capacity(value.len().max(32));
 
     let mut ranked_items: Vec<RankedItem<'a, T>> = Vec::with_capacity(items.len());
 

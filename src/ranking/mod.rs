@@ -248,6 +248,112 @@ pub fn get_acronym(s: &str) -> String {
     acronym
 }
 
+/// Lookup table mapping Latin-1 Supplement bytes (0x00..0x3F offset from U+00C0)
+/// to their base ASCII character after stripping diacritics. A value of 0
+/// means the character has no simple ASCII base (e.g. U+00D0 ETH, U+00D7
+/// MULTIPLICATION SIGN) and must be kept as-is.
+///
+/// Covers U+00C0 through U+00FF (the accented Latin characters that appear
+/// as 2-byte UTF-8 with lead byte 0xC3).
+const LATIN1_STRIP: [u8; 64] = [
+    // U+00C0..U+00CF
+    b'A', b'A', b'A', b'A', b'A', b'A', 0, b'C', // A-grave..AE(0)..C-cedilla
+    b'E', b'E', b'E', b'E', b'I', b'I', b'I', b'I', // E-grave..I-diaeresis
+    // U+00D0..U+00DF
+    0, b'N', b'O', b'O', b'O', b'O', b'O', 0, // ETH(0)..N-tilde..O-diaeresis..times(0)
+    0, b'U', b'U', b'U', b'U', b'Y', 0,
+    0, // O-stroke(0)..U-grave..Y-acute..thorn(0)..sharp-s(0)
+    // U+00E0..U+00EF
+    b'a', b'a', b'a', b'a', b'a', b'a', 0, b'c', // a-grave..ae(0)..c-cedilla
+    b'e', b'e', b'e', b'e', b'i', b'i', b'i', b'i', // e-grave..i-diaeresis
+    // U+00F0..U+00FF
+    0, b'n', b'o', b'o', b'o', b'o', b'o', 0, // eth(0)..n-tilde..o-diaeresis..divide(0)
+    0, b'u', b'u', b'u', b'u', b'y', 0,
+    b'y', // o-stroke(0)..u-grave..y-acute..thorn(0)..y-diaeresis
+];
+
+/// Fast diacritics stripping for strings whose non-ASCII characters are all
+/// in the Latin-1 Supplement range (U+00C0..U+00FF). Returns `None` if any
+/// character falls outside this range, signaling the caller to use the
+/// general NFD path.
+///
+/// When all non-ASCII chars are Latin-1 and at least one has a strippable
+/// accent, returns `Some(Cow::Owned(...))`. When none need stripping (e.g.
+/// all non-ASCII chars are U+00C6 AE, U+00D0 ETH, etc.), returns
+/// `Some(Cow::Borrowed(s))`.
+fn strip_latin1_diacritics(s: &str) -> Option<Cow<'_, str>> {
+    let bytes = s.as_bytes();
+    let mut needs_strip = false;
+    let mut i = 0;
+
+    // First pass: verify all non-ASCII chars are 2-byte Latin-1 Supplement
+    // and check whether any stripping is needed.
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < 0x80 {
+            // ASCII byte: skip.
+            i += 1;
+        } else if b == 0xC3 && i + 1 < bytes.len() {
+            // 2-byte UTF-8 for U+00C0..U+00FF (lead byte 0xC3).
+            let trail = bytes[i + 1];
+            // Trail byte for U+00C0..U+00FF is 0x80..0xBF.
+            let offset = trail.wrapping_sub(0x80);
+            if offset < 64 && LATIN1_STRIP[offset as usize] != 0 {
+                needs_strip = true;
+            }
+            i += 2;
+        } else if b == 0xC2 && i + 1 < bytes.len() {
+            // 2-byte UTF-8 for U+0080..U+00BF (non-break space, soft
+            // hyphen, etc.) -- no diacritics, but still Latin-1. Skip.
+            i += 2;
+        } else {
+            // b >= 0x80 (all remaining non-ASCII bytes): multi-byte char
+            // outside Latin-1 Supplement. Bail out to the general NFD path.
+            return None;
+        }
+    }
+
+    if !needs_strip {
+        return Some(Cow::Borrowed(s));
+    }
+
+    // Second pass: build the stripped string.
+    let mut result = String::with_capacity(s.len());
+    let mut j = 0;
+    while j < bytes.len() {
+        let b = bytes[j];
+        if b < 0x80 {
+            result.push(b as char);
+            j += 1;
+        } else if b == 0xC3 && j + 1 < bytes.len() {
+            let trail = bytes[j + 1];
+            let offset = trail.wrapping_sub(0x80);
+            if offset < 64 {
+                let base = LATIN1_STRIP[offset as usize];
+                if base != 0 {
+                    result.push(base as char);
+                } else {
+                    // Non-strippable Latin-1 char (AE, ETH, etc.): keep
+                    // original 2-byte sequence.
+                    // SAFETY: we verified this is valid 2-byte UTF-8 above.
+                    result.push_str(
+                        std::str::from_utf8(&bytes[j..j + 2]).expect("valid 2-byte UTF-8 sequence"),
+                    );
+                }
+            }
+            j += 2;
+        } else {
+            // 0xC2 lead byte or other: keep the 2-byte sequence.
+            result.push_str(
+                std::str::from_utf8(&bytes[j..j + 2]).expect("valid 2-byte UTF-8 sequence"),
+            );
+            j += 2;
+        }
+    }
+
+    Some(Cow::Owned(result))
+}
+
 /// Prepare a string for comparison by optionally stripping diacritics.
 ///
 /// When `keep_diacritics` is `false`, applies Unicode NFD decomposition and
@@ -300,19 +406,55 @@ pub fn prepare_value_for_comparison(s: &str, keep_diacritics: bool) -> Cow<'_, s
         return Cow::Borrowed(s);
     }
 
-    // Apply NFD decomposition and filter out combining marks (accents,
-    // diacritical marks, etc.). NFD splits precomposed characters like
-    // U+00E9 (e-acute) into their base letter + combining mark, so
-    // filtering the marks effectively strips the diacritics.
-    let stripped: String = s.nfd().filter(|c| !is_combining_mark(*c)).collect();
-
-    if stripped == s {
-        // NFD + filtering produced the same bytes as the original,
-        // so return borrowed to avoid keeping the allocation.
-        Cow::Borrowed(s)
-    } else {
-        Cow::Owned(stripped)
+    // Try the Latin-supplement fast path first: if every non-ASCII char is
+    // in U+00C0..U+00FF (2-byte UTF-8: 0xC3 lead byte), we can strip
+    // diacritics via a cheap lookup table instead of running full NFD.
+    // This covers the vast majority of accented Latin text (French, German,
+    // Spanish, Portuguese, etc.).
+    if let Some(result) = strip_latin1_diacritics(s) {
+        return result;
     }
+
+    // General path for non-Latin-1 non-ASCII text (CJK, extended Latin,
+    // combining marks, etc.): single-pass NFD with lazy allocation.
+    // Iterates the NFD output once. As long as no combining mark is found,
+    // no allocation occurs. When the first mark appears, allocates a buffer,
+    // backfills the non-mark prefix, then continues filtering.
+    let mut nfd = s.nfd();
+    let mut prefix_len: usize = 0;
+
+    loop {
+        match nfd.next() {
+            Some(c) if is_combining_mark(c) => break,
+            Some(_) => {
+                prefix_len += 1;
+            }
+            None => {
+                // No combining marks found: input is unchanged after NFD.
+                return Cow::Borrowed(s);
+            }
+        }
+    }
+
+    // A combining mark was found. Allocate and collect.
+    let mut result = String::with_capacity(s.len());
+
+    // Backfill non-mark chars emitted before the first mark.
+    for (i, c) in s.nfd().enumerate() {
+        if i >= prefix_len {
+            break;
+        }
+        result.push(c);
+    }
+
+    // Continue filtering the rest of the NFD iterator.
+    for c in nfd {
+        if !is_combining_mark(c) {
+            result.push(c);
+        }
+    }
+
+    Cow::Owned(result)
 }
 
 /// Pre-computed query data for amortizing repeated per-item ranking calls.
@@ -362,18 +504,32 @@ impl PreparedQuery {
 /// When `s` is ASCII, uses a byte-level fast path that avoids Unicode
 /// case-mapping tables entirely. For non-ASCII input, falls back to
 /// `char::to_lowercase()`.
+///
+/// Both branches include an already-lowercase early exit: if the string
+/// contains no uppercase characters, it is bulk-copied into `buf` via
+/// `push_str` instead of iterating per-character.
 fn lowercase_into(s: &str, buf: &mut String) {
     buf.clear();
     if s.is_ascii() {
         buf.reserve(s.len());
-        // ASCII bytes are single-byte UTF-8, so lowercasing byte-by-byte
-        // and casting to char is safe and avoids Unicode lookup tables.
-        buf.extend(s.as_bytes().iter().map(|&b| b.to_ascii_lowercase() as char));
+        if s.as_bytes().iter().all(|b| !b.is_ascii_uppercase()) {
+            // Already lowercase: bulk-copy avoids per-byte case mapping.
+            buf.push_str(s);
+        } else {
+            // ASCII bytes are single-byte UTF-8, so lowercasing byte-by-byte
+            // and casting to char is safe and avoids Unicode lookup tables.
+            buf.extend(s.as_bytes().iter().map(|&b| b.to_ascii_lowercase() as char));
+        }
     } else {
         buf.reserve(s.len());
-        for c in s.chars() {
-            for lc in c.to_lowercase() {
-                buf.push(lc);
+        if s.chars().all(|c| !c.is_uppercase()) {
+            // Already lowercase: bulk-copy avoids per-char case mapping.
+            buf.push_str(s);
+        } else {
+            for c in s.chars() {
+                for lc in c.to_lowercase() {
+                    buf.push(lc);
+                }
             }
         }
     }
@@ -723,9 +879,9 @@ mod tests {
 
     #[test]
     fn returns_borrowed_for_non_ascii_without_diacritics() {
-        // CJK characters have no combining marks after NFD, so the stripped
-        // result equals the original. Even though these are not ASCII, the
-        // function detects no change and returns borrowed.
+        // Early-exit path: CJK characters have no combining marks, so the
+        // pre-scan returns Cow::Borrowed immediately without NFD decomposition
+        // or heap allocation.
         let result = prepare_value_for_comparison("\u{4e16}\u{754c}", false);
         assert_eq!(result, "\u{4e16}\u{754c}");
         assert!(matches!(result, Cow::Borrowed(_)));
@@ -753,6 +909,19 @@ mod tests {
         let result = prepare_value_for_comparison("a\u{0300}\u{0301}", false);
         assert_eq!(result, "a");
         assert!(matches!(result, Cow::Owned(_)));
+    }
+
+    #[test]
+    fn preserves_o_stroke_unchanged() {
+        // U+00F8 (LATIN SMALL LETTER O WITH STROKE) does NOT decompose via
+        // NFD -- its NFD form is itself, with no combining marks. The
+        // LATIN1_STRIP table must map it to 0 (preserve) rather than b'o'.
+        let result = prepare_value_for_comparison("\u{00F8}slo", false);
+        assert_eq!(result, "\u{00F8}slo");
+        assert!(
+            matches!(result, Cow::Borrowed(_)),
+            "o-stroke string should be returned borrowed (no allocation)"
+        );
     }
 
     // --- get_closeness_ranking tests ---
@@ -1085,5 +1254,95 @@ mod tests {
             get_match_ranking("\u{4e16}\u{754c}", "abc", false),
             Ranking::NoMatch
         );
+    }
+
+    // --- lowercase_into tests ---
+
+    #[test]
+    fn lowercase_into_already_lowercase_ascii() {
+        // Already-lowercase ASCII string takes the fast path (bulk copy).
+        let mut buf = String::new();
+        lowercase_into("hello world", &mut buf);
+        assert_eq!(buf, "hello world");
+    }
+
+    #[test]
+    fn lowercase_into_already_lowercase_ascii_no_realloc() {
+        // On a second call with the same buffer (already capacitated),
+        // no reallocation occurs because buf.reserve() is a no-op.
+        let mut buf = String::new();
+        lowercase_into("hello world", &mut buf);
+        assert_eq!(buf, "hello world");
+
+        let ptr_before = buf.as_ptr();
+        let cap_before = buf.capacity();
+        lowercase_into("hello world", &mut buf);
+        assert_eq!(buf, "hello world");
+        // Same allocation: pointer and capacity are unchanged.
+        assert_eq!(buf.as_ptr(), ptr_before);
+        assert_eq!(buf.capacity(), cap_before);
+    }
+
+    #[test]
+    fn lowercase_into_mixed_case_ascii() {
+        // Mixed-case ASCII falls through to the per-byte mapping path.
+        let mut buf = String::new();
+        lowercase_into("Hello World", &mut buf);
+        assert_eq!(buf, "hello world");
+    }
+
+    #[test]
+    fn lowercase_into_all_uppercase_ascii() {
+        let mut buf = String::new();
+        lowercase_into("HELLO WORLD", &mut buf);
+        assert_eq!(buf, "hello world");
+    }
+
+    #[test]
+    fn lowercase_into_already_lowercase_non_ascii() {
+        // Pre-lowercased non-ASCII string takes the fast path (bulk copy).
+        let mut buf = String::new();
+        lowercase_into("cafe", &mut buf);
+        assert_eq!(buf, "cafe");
+    }
+
+    #[test]
+    fn lowercase_into_non_ascii_with_uppercase() {
+        // Non-ASCII string containing uppercase falls through to per-char
+        // case mapping via `char::to_lowercase()`.
+        let mut buf = String::new();
+        lowercase_into("Universitat", &mut buf);
+        assert_eq!(buf, "universitat");
+    }
+
+    #[test]
+    fn lowercase_into_empty_string() {
+        let mut buf = String::new();
+        lowercase_into("", &mut buf);
+        assert_eq!(buf, "");
+    }
+
+    #[test]
+    fn lowercase_into_clears_previous_contents() {
+        // Calling lowercase_into overwrites previous buffer contents.
+        let mut buf = String::from("leftover data");
+        lowercase_into("new", &mut buf);
+        assert_eq!(buf, "new");
+    }
+
+    #[test]
+    fn lowercase_into_non_ascii_already_lowercase_cjk() {
+        // CJK characters have no uppercase form; the fast path applies.
+        let mut buf = String::new();
+        lowercase_into("\u{4e16}\u{754c}", &mut buf);
+        assert_eq!(buf, "\u{4e16}\u{754c}");
+    }
+
+    #[test]
+    fn lowercase_into_non_ascii_mixed_case_with_accent() {
+        // U+00C9 = LATIN CAPITAL LETTER E WITH ACUTE -> lowercases to U+00E9
+        let mut buf = String::new();
+        lowercase_into("Caf\u{00C9}", &mut buf);
+        assert_eq!(buf, "caf\u{00E9}");
     }
 }

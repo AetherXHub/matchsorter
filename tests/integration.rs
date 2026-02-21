@@ -691,7 +691,10 @@ fn threshold_acronym() {
 fn cyrillic_case_insensitive() {
     // U+041B = capital el, U+043B = small el
     // U+041F = capital pe, U+043F = small pe, etc.
-    let items = ["\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}", "\u{041b}\u{0435}\u{0434}"];
+    let items = [
+        "\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}",
+        "\u{041b}\u{0435}\u{0434}",
+    ];
     // Search with lowercase Cyrillic "l" (\u{043B})
     let results = match_sorter(&items, "\u{043b}", MatchSorterOptions::default());
     // "\u{041b}\u{0435}\u{0434}" (Led) starts with capital L; case-insensitive
@@ -722,7 +725,10 @@ fn fuzzy_sub_score_ordering() {
     // "Bosnia and Herzegovina" -> fuzzy match for i,n,a
     // Contains items sort before Matches items. Within the same tier,
     // sub-scores or alphabetical tiebreaker applies.
-    assert!(results.len() >= 2, "at least India and Indonesia should match");
+    assert!(
+        results.len() >= 2,
+        "at least India and Indonesia should match"
+    );
     // India and Indonesia both match via Contains; "India" is alphabetically
     // before "Indonesia" so it sorts first among equals.
     let india_pos = results.iter().position(|&r| r == &"India");
@@ -767,9 +773,18 @@ fn stable_sort_preserves_insertion_order() {
     }
 
     let items = vec![
-        CountedItem { country: "Italy".to_owned(), counter: 1 },
-        CountedItem { country: "Italy".to_owned(), counter: 2 },
-        CountedItem { country: "Italy".to_owned(), counter: 3 },
+        CountedItem {
+            country: "Italy".to_owned(),
+            counter: 1,
+        },
+        CountedItem {
+            country: "Italy".to_owned(),
+            counter: 2,
+        },
+        CountedItem {
+            country: "Italy".to_owned(),
+            counter: 3,
+        },
     ];
     let opts = MatchSorterOptions {
         keys: vec![Key::new(|i: &CountedItem| vec![i.country.clone()])],
@@ -805,8 +820,14 @@ fn per_key_threshold_more_permissive_than_global() {
     }
 
     let items = vec![
-        Person { name: "Fred".to_owned(), color: "Orange".to_owned() },
-        Person { name: "Jen".to_owned(), color: "Red".to_owned() },
+        Person {
+            name: "Fred".to_owned(),
+            color: "Orange".to_owned(),
+        },
+        Person {
+            name: "Jen".to_owned(),
+            color: "Red".to_owned(),
+        },
     ];
     let opts = MatchSorterOptions {
         keys: vec![
