@@ -17,7 +17,7 @@ per-key ranking controls.
 
 Key differences from the JS library:
 
-- Native Rust performance (5-8x faster on equivalent workloads)
+- Native Rust performance (4-7x faster on equivalent workloads)
 - Zero-copy ranking in no-keys mode (borrows directly from input)
 - SIMD-accelerated substring search via `memchr`
 - Amortized allocations through reusable buffers and `PreparedQuery`
@@ -157,12 +157,13 @@ items. All times are median microseconds.
 
 | Benchmark | Rust | JS | Speedup |
 |-----------|-----:|---:|--------:|
-| Throughput (10k items) | 481 us | 2,717 us | **5.6x** |
-| Exact match | 380 us | 2,092 us | **5.5x** |
-| Prefix match | 328 us | 2,224 us | **6.8x** |
-| Substring match | 390 us | 2,113 us | **5.4x** |
-| Fuzzy match | 495 us | 2,896 us | **5.9x** |
-| No match (early exit) | 359 us | 1,870 us | **5.2x** |
+| Throughput (10k items) | 455 us | 2,671 us | **5.9x** |
+| Exact match | 351 us | 2,126 us | **6.1x** |
+| Prefix match | 298 us | 2,214 us | **7.4x** |
+| Substring match | 356 us | 1,915 us | **5.4x** |
+| Fuzzy match | 460 us | 2,705 us | **5.9x** |
+| No match (early exit) | 327 us | 1,706 us | **5.2x** |
+| Diacritics strip (10k) | 761 us | 2,935 us | **3.9x** |
 
 See [`bench-compare/`](bench-compare/) for reproduction instructions.
 

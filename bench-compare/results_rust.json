@@ -1,27 +1,27 @@
 {
   "throughput": {
-    "100": { "median_us": 3.43, "min_us": 3.38, "max_us": 4.10, "p25_us": 3.41, "p75_us": 3.44 },
-    "1000": { "median_us": 40.01, "min_us": 39.51, "max_us": 45.57, "p25_us": 39.80, "p75_us": 40.24 },
-    "10000": { "median_us": 480.70, "min_us": 472.59, "max_us": 557.79, "p25_us": 477.22, "p75_us": 487.37 },
-    "100000": { "median_us": 5900.00, "min_us": 5783.17, "max_us": 6447.72, "p25_us": 5835.54, "p75_us": 5913.98 }
+    "100": { "median_us": 3.31, "min_us": 3.25, "max_us": 64.44, "p25_us": 3.29, "p75_us": 3.34 },
+    "1000": { "median_us": 37.76, "min_us": 37.47, "max_us": 54.90, "p25_us": 37.69, "p75_us": 37.88 },
+    "10000": { "median_us": 455.19, "min_us": 446.39, "max_us": 531.87, "p25_us": 452.28, "p75_us": 462.75 },
+    "100000": { "median_us": 5417.47, "min_us": 5390.07, "max_us": 5574.52, "p25_us": 5407.06, "p75_us": 5428.31 }
   },
   "query_types": {
-    "exact": { "median_us": 380.49, "min_us": 374.42, "max_us": 472.43, "p25_us": 376.88, "p75_us": 392.98 },
-    "prefix": { "median_us": 328.21, "min_us": 321.87, "max_us": 375.44, "p25_us": 326.33, "p75_us": 332.35 },
-    "substring": { "median_us": 390.16, "min_us": 382.62, "max_us": 439.66, "p25_us": 385.76, "p75_us": 396.36 },
-    "fuzzy": { "median_us": 494.93, "min_us": 484.85, "max_us": 544.09, "p25_us": 489.59, "p75_us": 501.57 },
-    "no_match": { "median_us": 359.48, "min_us": 349.84, "max_us": 410.85, "p25_us": 354.83, "p75_us": 365.00 }
+    "exact": { "median_us": 351.11, "min_us": 340.42, "max_us": 431.05, "p25_us": 348.72, "p75_us": 353.35 },
+    "prefix": { "median_us": 298.30, "min_us": 287.25, "max_us": 631.79, "p25_us": 294.22, "p75_us": 300.50 },
+    "substring": { "median_us": 356.45, "min_us": 347.73, "max_us": 598.52, "p25_us": 354.06, "p75_us": 360.09 },
+    "fuzzy": { "median_us": 460.31, "min_us": 454.48, "max_us": 561.49, "p25_us": 457.69, "p75_us": 462.20 },
+    "no_match": { "median_us": 327.42, "min_us": 317.69, "max_us": 409.42, "p25_us": 323.21, "p75_us": 330.10 }
   },
   "diacritics": {
-    "strip": { "median_us": 1217.05, "min_us": 1196.59, "max_us": 1282.91, "p25_us": 1208.13, "p75_us": 1227.14 },
-    "keep": { "median_us": 580.36, "min_us": 570.36, "max_us": 1048.80, "p25_us": 576.54, "p75_us": 592.31 }
+    "strip": { "median_us": 761.11, "min_us": 750.66, "max_us": 837.11, "p25_us": 758.61, "p75_us": 762.58 },
+    "keep": { "median_us": 339.35, "min_us": 329.27, "max_us": 402.17, "p25_us": 335.93, "p75_us": 341.57 }
   },
   "threshold": {
-    "default": { "median_us": 480.42, "min_us": 475.22, "max_us": 540.55, "p25_us": 478.47, "p75_us": 484.00 },
-    "contains": { "median_us": 375.26, "min_us": 371.42, "max_us": 439.29, "p25_us": 373.52, "p75_us": 383.85 }
+    "default": { "median_us": 457.56, "min_us": 445.50, "max_us": 534.20, "p25_us": 453.29, "p75_us": 458.68 },
+    "contains": { "median_us": 349.68, "min_us": 340.31, "max_us": 401.06, "p25_us": 346.16, "p75_us": 352.38 }
   },
   "empty_query": {
-    "100": { "median_us": 3.23, "min_us": 3.20, "max_us": 3.27, "p25_us": 3.22, "p75_us": 3.24 },
-    "10000": { "median_us": 265.53, "min_us": 262.54, "max_us": 291.78, "p25_us": 264.12, "p75_us": 267.52 }
+    "100": { "median_us": 3.13, "min_us": 3.10, "max_us": 3.19, "p25_us": 3.12, "p75_us": 3.16 },
+    "10000": { "median_us": 237.16, "min_us": 230.39, "max_us": 248.14, "p25_us": 234.63, "p75_us": 239.94 }
   }
 }

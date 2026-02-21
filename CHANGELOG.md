@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-21
+
+### Changed
+
+- Latin-1 lookup table for O(n) byte-level diacritics stripping (~4x over JS, up from ~2.5x)
+- Single-pass NFD with lazy allocation for non-Latin-1 diacritics
+- Already-lowercase early-exit in `lowercase_into` for ASCII and non-ASCII
+- Pre-allocated `candidate_buf` to avoid grow-from-zero reallocation
+
 ## [0.1.0] - 2026-02-21
 
 ### Added
@@ -28,5 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Criterion benchmarks and JS comparison benchmarks
 - Dual MIT/Apache-2.0 licensing
 
-[Unreleased]: https://github.com/AetherXHub/matchsorter/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AetherXHub/matchsorter/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AetherXHub/matchsorter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AetherXHub/matchsorter/releases/tag/v0.1.0
