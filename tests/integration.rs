@@ -563,3 +563,317 @@ fn per_key_threshold_override() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].name, "apple");
 }
+
+// ---------------------------------------------------------------------------
+// 15. Threshold tier coverage (JS parity tests 22-27)
+// ---------------------------------------------------------------------------
+
+/// Threshold = NoMatch disables filtering entirely and returns every item.
+/// Corresponds to JS test: "when providing a rank threshold of NO_MATCH,
+/// it returns all of the items".
+#[test]
+fn threshold_no_match_returns_all() {
+    let items = ["orange", "apple", "grape", "banana"];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::NoMatch,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "ap", opts);
+    // Every item passes: NoMatch is the lowest possible tier, so rank >= NoMatch
+    // is always true. Items that actually match sort first; non-matching items
+    // sort after them.
+    assert_eq!(
+        results.len(),
+        items.len(),
+        "all items should be returned with NoMatch threshold"
+    );
+    // "apple" (StartsWith) should appear before non-matching items.
+    assert_eq!(results[0], &"apple");
+}
+
+/// Threshold = Equal returns only exact case-insensitive matches.
+/// Corresponds to JS test: "when providing a rank threshold of EQUAL,
+/// it returns only the items that are equal".
+#[test]
+fn threshold_equal_only_exact() {
+    let items = ["google", "airbnb", "apple", "apply", "app"];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::Equal,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "app", opts);
+    // Only "app" matches at Equal or above (CaseSensitiveEqual in this case).
+    // "apple" and "apply" are StartsWith which is below Equal.
+    assert_eq!(results, vec![&"app"]);
+}
+
+/// Threshold = WordStartsWith includes tiers down to WordStartsWith but
+/// excludes Contains, Acronym, and Matches.
+/// Corresponds to JS test: "when providing a rank threshold of
+/// WORD_STARTS_WITH, it returns only the items that are equal".
+#[test]
+fn threshold_word_starts_with() {
+    let items = ["fiji apple", "google", "app", "crabapple", "apple", "apply"];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::WordStartsWith,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "app", opts);
+    // "app" -> CaseSensitiveEqual (passes)
+    // "apple" -> StartsWith (passes)
+    // "apply" -> StartsWith (passes)
+    // "fiji apple" -> WordStartsWith (passes, "apple" after space)
+    // "crabapple" -> Contains (excluded, below WordStartsWith)
+    // "google" -> NoMatch (excluded)
+    assert_eq!(results.len(), 4);
+    assert!(results.contains(&&"app"));
+    assert!(results.contains(&&"apple"));
+    assert!(results.contains(&&"apply"));
+    assert!(results.contains(&&"fiji apple"));
+    assert!(!results.contains(&&"crabapple"));
+    assert!(!results.contains(&&"google"));
+}
+
+/// WordStartsWith threshold correctly includes items where a word boundary
+/// appears after a prefix.
+/// Corresponds to JS test: "when providing a rank threshold of
+/// WORD_STARTS_WITH, correctly return items that have a word after a suffix".
+#[test]
+fn threshold_word_starts_with_after_suffix() {
+    let items = [
+        "fiji apple",
+        "google",
+        "app",
+        "crabapple",
+        "apple",
+        "apply",
+        "snappy apple",
+    ];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::WordStartsWith,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "app", opts);
+    // "snappy apple" -> WordStartsWith ("apple" starts at a word boundary)
+    assert!(
+        results.contains(&&"snappy apple"),
+        "snappy apple should match via WordStartsWith"
+    );
+    assert_eq!(results.len(), 5);
+}
+
+/// Threshold = Acronym includes tiers down to Acronym but excludes
+/// Matches and NoMatch.
+/// Corresponds to JS test: "when providing a rank threshold of ACRONYM,
+/// it returns only the items that meet the rank".
+#[test]
+fn threshold_acronym() {
+    let items = ["apple", "atop", "alpaca", "vamped"];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::Acronym,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "ap", opts);
+    // "apple" -> StartsWith (passes)
+    // "atop" -> only fuzzy match for "ap" (a...p) -> Matches, excluded
+    // "alpaca" -> only fuzzy match -> Matches, excluded
+    // "vamped" -> NoMatch or fuzzy only, excluded
+    assert_eq!(results, vec![&"apple"]);
+}
+
+// ---------------------------------------------------------------------------
+// 16. Cyrillic case-insensitive matching (JS test 34)
+// ---------------------------------------------------------------------------
+
+/// Case-insensitive matching with Cyrillic characters.
+/// Corresponds to JS test: "case insensitive cyrillic match".
+#[test]
+fn cyrillic_case_insensitive() {
+    // U+041B = capital el, U+043B = small el
+    // U+041F = capital pe, U+043F = small pe, etc.
+    let items = ["\u{041f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}", "\u{041b}\u{0435}\u{0434}"];
+    // Search with lowercase Cyrillic "l" (\u{043B})
+    let results = match_sorter(&items, "\u{043b}", MatchSorterOptions::default());
+    // "\u{041b}\u{0435}\u{0434}" (Led) starts with capital L; case-insensitive
+    // matching should find the lowercase query in the lowercased candidate.
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], &"\u{041b}\u{0435}\u{0434}");
+}
+
+// ---------------------------------------------------------------------------
+// 17. Fuzzy sub-score ordering at integration level (JS test 30)
+// ---------------------------------------------------------------------------
+
+/// Two items that both match fuzzily should be ordered by closeness.
+/// Corresponds to JS test: "sorts items based on how closely they match".
+#[test]
+fn fuzzy_sub_score_ordering() {
+    let items = [
+        "Antigua and Barbuda",
+        "India",
+        "Bosnia and Herzegovina",
+        "Indonesia",
+    ];
+    let results = match_sorter(&items, "Ina", MatchSorterOptions::default());
+    // "India" -> Contains ("Ina" is NOT a substring of "India" case-sensitively,
+    // but "ina" is a substring of "india" -> Contains)
+    // "Indonesia" -> Contains ("ina" is a substring of "indonesia")
+    // "Antigua and Barbuda" -> fuzzy match for i,n,a
+    // "Bosnia and Herzegovina" -> fuzzy match for i,n,a
+    // Contains items sort before Matches items. Within the same tier,
+    // sub-scores or alphabetical tiebreaker applies.
+    assert!(results.len() >= 2, "at least India and Indonesia should match");
+    // India and Indonesia both match via Contains; "India" is alphabetically
+    // before "Indonesia" so it sorts first among equals.
+    let india_pos = results.iter().position(|&r| r == &"India");
+    let indonesia_pos = results.iter().position(|&r| r == &"Indonesia");
+    assert!(
+        india_pos.is_some() && indonesia_pos.is_some(),
+        "both India and Indonesia should match"
+    );
+    assert!(
+        india_pos.unwrap() < indonesia_pos.unwrap(),
+        "India should sort before Indonesia (same tier, alphabetical tiebreak)"
+    );
+    // Any fuzzy-only matches (Antigua, Bosnia) should sort after Contains matches.
+    if let Some(antigua_pos) = results.iter().position(|&r| r == &"Antigua and Barbuda") {
+        assert!(
+            antigua_pos > indonesia_pos.unwrap(),
+            "fuzzy matches should sort after Contains matches"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 18. Stable sort for identical items (JS test 36)
+// ---------------------------------------------------------------------------
+
+/// Equal-ranked items with identical values preserve original insertion order.
+/// Corresponds to JS test: "returns objects in their original order".
+#[test]
+fn stable_sort_preserves_insertion_order() {
+    // Three items with the same name. They all produce identical ranking,
+    // key_index, and ranked_value. The only differentiator is insertion order.
+    // A stable sort must preserve the original order.
+    #[derive(Debug, PartialEq)]
+    struct CountedItem {
+        country: String,
+        counter: usize,
+    }
+    impl AsMatchStr for CountedItem {
+        fn as_match_str(&self) -> &str {
+            &self.country
+        }
+    }
+
+    let items = vec![
+        CountedItem { country: "Italy".to_owned(), counter: 1 },
+        CountedItem { country: "Italy".to_owned(), counter: 2 },
+        CountedItem { country: "Italy".to_owned(), counter: 3 },
+    ];
+    let opts = MatchSorterOptions {
+        keys: vec![Key::new(|i: &CountedItem| vec![i.country.clone()])],
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "Italy", opts);
+    assert_eq!(results.len(), 3);
+    // Verify original insertion order is preserved.
+    assert_eq!(results[0].counter, 1);
+    assert_eq!(results[1].counter, 2);
+    assert_eq!(results[2].counter, 3);
+}
+
+// ---------------------------------------------------------------------------
+// 19. Per-key threshold more permissive than global (JS test 33)
+// ---------------------------------------------------------------------------
+
+/// A per-key threshold that is MORE permissive (lower) than the global
+/// threshold allows weaker matches through for that key.
+/// Corresponds to JS test: "should match when key threshold is lower than
+/// the default threshold".
+#[test]
+fn per_key_threshold_more_permissive_than_global() {
+    #[derive(Debug, PartialEq)]
+    struct Person {
+        name: String,
+        color: String,
+    }
+    impl AsMatchStr for Person {
+        fn as_match_str(&self) -> &str {
+            &self.name
+        }
+    }
+
+    let items = vec![
+        Person { name: "Fred".to_owned(), color: "Orange".to_owned() },
+        Person { name: "Jen".to_owned(), color: "Red".to_owned() },
+    ];
+    let opts = MatchSorterOptions {
+        keys: vec![
+            // name key uses the global threshold (StartsWith) by default
+            Key::new(|p: &Person| vec![p.name.clone()]),
+            // color key explicitly allows Contains (more permissive than global)
+            Key::new(|p: &Person| vec![p.color.clone()]).threshold(Ranking::Contains),
+        ],
+        threshold: Ranking::StartsWith, // global threshold is strict
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "ed", opts);
+    // "Fred" + name key: "ed" in "fred" -> Contains, but global threshold
+    //   is StartsWith so it fails for the name key (no per-key threshold set).
+    //   "Fred" + color key: "ed" not in "orange" at Contains level -> no match.
+    //
+    // "Jen" + name key: "ed" not in "jen" -> NoMatch.
+    // "Jen" + color key: "ed" in "red" -> Contains, and per-key threshold
+    //   is Contains, so this passes.
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].name, "Jen");
+}
+
+// ---------------------------------------------------------------------------
+// 20. Diacritics in alphabetical tiebreaking (JS test 35)
+// ---------------------------------------------------------------------------
+
+/// Items with diacritics participate in tiebreaking without panics.
+/// Corresponds to JS test: "should sort same ranked items alphabetically
+/// while when mixed with diacritics".
+///
+/// NOTE: The JS library strips diacritics for the alphabetical tiebreaker,
+/// so "zebra" (stripped) sorts before "zigzag". The Rust implementation
+/// tiebreaks on the *original* ranked_value, so "zigzag" sorts before
+/// "z\u{00e9}bra" because 'i' (0x69) < '\u{00e9}' (0xC3 in UTF-8).
+#[test]
+fn diacritics_alphabetical_tiebreaking() {
+    let items = [
+        "zoo",
+        "z\u{00e9}bra", // zebra with accent
+        "zigzag",
+        "azure",
+    ];
+    let opts = MatchSorterOptions {
+        threshold: Ranking::NoMatch,
+        ..Default::default()
+    };
+    let results = match_sorter(&items, "z", opts);
+    assert_eq!(
+        results.len(),
+        items.len(),
+        "all items returned with NoMatch threshold"
+    );
+    // StartsWith items sort before Contains items.
+    // "zigzag", "zoo", "z\u{00e9}bra" -> StartsWith (z at position 0).
+    // "azure" -> Contains (z at position 1).
+    let azure_pos = results
+        .iter()
+        .position(|&&r| r == "azure")
+        .expect("azure should be in results");
+    let starts_with_items: Vec<&&str> = results[..azure_pos].to_vec();
+    assert_eq!(starts_with_items.len(), 3);
+    // Tiebreaker is byte-order on original ranked_value:
+    // "zigzag" < "zoo" < "z\u{00e9}bra" (because 'i' < 'o' < 0xC3).
+    assert_eq!(starts_with_items[0], &"zigzag");
+    assert_eq!(starts_with_items[1], &"zoo");
+    assert_eq!(starts_with_items[2], &"z\u{00e9}bra");
+    // "azure" (Contains) comes last.
+    assert_eq!(results[3], &"azure");
+}
