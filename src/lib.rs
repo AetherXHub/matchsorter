@@ -32,9 +32,10 @@
 //! ```
 //! use matchsorter::{match_sorter, MatchSorterOptions};
 //!
-//! let items = ["apple", "banana", "grape"];
+//! let items = ["apple", "banana", "grape", "pineapple"];
 //! let results = match_sorter(&items, "ap", MatchSorterOptions::default());
-//! assert_eq!(results[0], &"apple");
+//! // "apple" (StartsWith), "grape" (Contains), "pineapple" (Contains); "banana" is dropped
+//! assert_eq!(results, vec![&"apple", &"grape", &"pineapple"]);
 //! ```
 //!
 //! # Keys Mode
@@ -54,6 +55,7 @@
 //! let users = vec![
 //!     User { name: "Alice".into(), email: "alice@example.com".into() },
 //!     User { name: "Bob".into(),   email: "bob@example.com".into() },
+//!     User { name: "Malika".into(), email: "malika@example.com".into() },
 //! ];
 //!
 //! let opts = MatchSorterOptions {
@@ -65,7 +67,10 @@
 //! };
 //!
 //! let results = match_sorter(&users, "ali", opts);
+//! // "Alice" (StartsWith on name), "Malika" (Contains "ali" in name); "Bob" is dropped
+//! assert_eq!(results.len(), 2);
 //! assert_eq!(results[0].name, "Alice");
+//! assert_eq!(results[1].name, "Malika");
 //! ```
 //!
 //! # Custom Threshold
@@ -158,10 +163,10 @@ use sort::{
 /// ```
 /// use matchsorter::{match_sorter, MatchSorterOptions};
 ///
-/// let items = ["apple", "banana", "grape"];
+/// let items = ["apple", "banana", "grape", "pineapple"];
 /// let results = match_sorter(&items, "ap", MatchSorterOptions::default());
-/// // "apple" matches via StartsWith, "grape" matches via fuzzy
-/// assert_eq!(results[0], &"apple");
+/// // "apple" (StartsWith), "grape" (Contains), "pineapple" (Contains); "banana" is dropped
+/// assert_eq!(results, vec![&"apple", &"grape", &"pineapple"]);
 /// ```
 ///
 /// With a custom threshold to exclude fuzzy matches:

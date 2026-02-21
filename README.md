@@ -35,7 +35,8 @@ use matchsorter::{match_sorter, MatchSorterOptions};
 
 let items = ["apple", "banana", "grape", "pineapple"];
 let results = match_sorter(&items, "ap", MatchSorterOptions::default());
-assert_eq!(results[0], &"apple");
+// "apple" (StartsWith), "grape" (Contains), "pineapple" (Contains); "banana" is dropped
+assert_eq!(results, vec![&"apple", &"grape", &"pineapple"]);
 ```
 
 ## Ranking Tiers
@@ -81,6 +82,7 @@ impl AsMatchStr for User {
 let users = vec![
     User { name: "Alice".into(), email: "alice@example.com".into() },
     User { name: "Bob".into(),   email: "bob@example.com".into() },
+    User { name: "Malika".into(), email: "malika@example.com".into() },
 ];
 
 let opts = MatchSorterOptions {
@@ -92,7 +94,10 @@ let opts = MatchSorterOptions {
 };
 
 let results = match_sorter(&users, "ali", opts);
+// "Alice" (StartsWith on name), "Malika" (Contains "ali" in name); "Bob" is dropped
+assert_eq!(results.len(), 2);
 assert_eq!(results[0].name, "Alice");
+assert_eq!(results[1].name, "Malika");
 ```
 
 ### Custom threshold
@@ -125,6 +130,7 @@ impl AsMatchStr for Item {
 
 let items = vec![
     Item { name: "Rust".into(), description: "A systems programming language".into() },
+    Item { name: "Trust".into(), description: "Build with trust and safety".into() },
 ];
 
 let opts = MatchSorterOptions {
@@ -138,7 +144,10 @@ let opts = MatchSorterOptions {
 };
 
 let results = match_sorter(&items, "rust", opts);
+// "Rust" (Equal on name), "Trust" (Contains on name); description caps don't outrank name
+assert_eq!(results.len(), 2);
 assert_eq!(results[0].name, "Rust");
+assert_eq!(results[1].name, "Trust");
 ```
 
 ## Performance
