@@ -31,6 +31,8 @@ pub mod options;
 /// Sorting logic for ordering matched candidates by rank and tie-breaking criteria.
 pub mod sort;
 
+use std::borrow::Cow;
+
 // Re-export primary public API types and functions at the crate root.
 pub use key::{Key, RankingInfo, get_highest_ranking, get_item_values};
 pub use no_keys::{AsMatchStr, rank_item};
@@ -38,9 +40,9 @@ pub use options::{MatchSorterOptions, RankedItem};
 pub use ranking::{Ranking, get_match_ranking};
 pub use sort::{default_base_sort, sort_ranked_values};
 
-use key::get_highest_ranking as get_highest_ranking_impl;
+use key::get_highest_ranking_prepared as get_highest_ranking_prepared_impl;
 use no_keys::AsMatchStr as AsMatchStrTrait;
-use ranking::get_match_ranking as get_match_ranking_impl;
+use ranking::{PreparedQuery, get_match_ranking_prepared as get_match_ranking_prepared_impl};
 use sort::{
     default_base_sort as default_base_sort_impl, sort_ranked_values as sort_ranked_values_impl,
 };
@@ -107,20 +109,44 @@ where
     T: AsMatchStrTrait,
 {
     // Step 1: Rank each item and filter by the effective threshold.
+    // Pre-compute query data once to avoid redundant work per item.
+    let pq = PreparedQuery::new(value, options.keep_diacritics);
+    let finder = if pq.lower.is_empty() {
+        None
+    } else {
+        Some(memchr::memmem::Finder::new(pq.lower.as_bytes()))
+    };
+    // Reusable buffer for lowercasing each candidate (avoids per-item allocation).
+    let mut candidate_buf = String::new();
+
     let mut ranked_items: Vec<RankedItem<'a, T>> = Vec::with_capacity(items.len());
 
     for (index, item) in items.iter().enumerate() {
         let (rank, ranked_value, key_index, key_threshold) = if options.keys.is_empty() {
             // No-keys mode: rank the item directly via AsMatchStr.
             let s = item.as_match_str();
-            let rank = get_match_ranking_impl(s, value, options.keep_diacritics);
-            (rank, s.to_owned(), 0_usize, None)
+            let rank = get_match_ranking_prepared_impl(
+                s,
+                &pq,
+                options.keep_diacritics,
+                &mut candidate_buf,
+                finder.as_ref(),
+            );
+            // Zero-copy: borrow the string directly from the input item.
+            (rank, Cow::Borrowed(s), 0_usize, None)
         } else {
             // Keys mode: evaluate all keys and pick the best ranking.
-            let info = get_highest_ranking_impl(item, &options.keys, value, &options);
+            let info = get_highest_ranking_prepared_impl(
+                item,
+                &options.keys,
+                &pq,
+                &options,
+                &mut candidate_buf,
+                finder.as_ref(),
+            );
             (
                 info.rank,
-                info.ranked_value,
+                Cow::Owned(info.ranked_value),
                 info.key_index,
                 info.key_threshold,
             )

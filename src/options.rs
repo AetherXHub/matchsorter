@@ -6,6 +6,7 @@
 //! [`RankedItem`] annotates an item with its ranking metadata, used during
 //! sorting and exposed to custom sort functions.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
 
@@ -38,6 +39,7 @@ type SorterFn<T> = Box<dyn Fn(Vec<RankedItem<T>>) -> Vec<RankedItem<T>>>;
 /// # Examples
 ///
 /// ```
+/// use std::borrow::Cow;
 /// use matchsorter::{RankedItem, Ranking};
 ///
 /// let item = "hello".to_owned();
@@ -45,7 +47,7 @@ type SorterFn<T> = Box<dyn Fn(Vec<RankedItem<T>>) -> Vec<RankedItem<T>>>;
 ///     item: &item,
 ///     index: 0,
 ///     rank: Ranking::CaseSensitiveEqual,
-///     ranked_value: "hello".to_owned(),
+///     ranked_value: Cow::Borrowed("hello"),
 ///     key_index: 0,
 ///     key_threshold: None,
 /// };
@@ -65,8 +67,9 @@ pub struct RankedItem<'a, T> {
     pub rank: Ranking,
 
     /// The string value (from one of the item's keys) that produced the
-    /// best match against the query.
-    pub ranked_value: String,
+    /// best match against the query. Borrowed in no-keys mode (zero-copy
+    /// from the input slice) and owned in keys mode.
+    pub ranked_value: Cow<'a, str>,
 
     /// Index of the winning key-value pair in the flattened key-values list.
     /// Lower values indicate keys declared earlier in the keys array.
@@ -250,7 +253,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::CaseSensitiveEqual,
-            ranked_value: "hello".to_owned(),
+            ranked_value: Cow::Borrowed("hello"),
             key_index: 0,
             key_threshold: None,
         };
@@ -269,7 +272,7 @@ mod tests {
             item: &item,
             index: 3,
             rank: Ranking::Contains,
-            ranked_value: "forty-two".to_owned(),
+            ranked_value: Cow::Borrowed("forty-two"),
             key_index: 1,
             key_threshold: Some(Ranking::StartsWith),
         };
@@ -284,7 +287,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::Acronym,
-            ranked_value: "test".to_owned(),
+            ranked_value: Cow::Borrowed("test"),
             key_index: 0,
             key_threshold: None,
         };
@@ -300,7 +303,7 @@ mod tests {
             item: &item,
             index: 1,
             rank: Ranking::StartsWith,
-            ranked_value: "world".to_owned(),
+            ranked_value: Cow::Borrowed("world"),
             key_index: 2,
             key_threshold: Some(Ranking::Contains),
         };
@@ -315,7 +318,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::Equal,
-            ranked_value: "a".to_owned(),
+            ranked_value: Cow::Borrowed("a"),
             key_index: 0,
             key_threshold: None,
         };
@@ -323,7 +326,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::Equal,
-            ranked_value: "a".to_owned(),
+            ranked_value: Cow::Borrowed("a"),
             key_index: 0,
             key_threshold: None,
         };
@@ -337,7 +340,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::Equal,
-            ranked_value: "a".to_owned(),
+            ranked_value: Cow::Borrowed("a"),
             key_index: 0,
             key_threshold: None,
         };
@@ -345,7 +348,7 @@ mod tests {
             item: &item,
             index: 0,
             rank: Ranking::Contains,
-            ranked_value: "a".to_owned(),
+            ranked_value: Cow::Borrowed("a"),
             key_index: 0,
             key_threshold: None,
         };

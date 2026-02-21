@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use matchsorter::{
     MatchSorterOptions, RankedItem, Ranking, default_base_sort, get_match_ranking, match_sorter,
@@ -45,8 +47,8 @@ fn generate_ranked_items(items: &[String]) -> Vec<RankedItem<'_, String>> {
         .map(|(i, item)| RankedItem {
             item,
             index: i,
-            rank: tiers[i % tiers.len()].clone(),
-            ranked_value: item.clone(),
+            rank: tiers[i % tiers.len()],
+            ranked_value: Cow::Owned(item.clone()),
             key_index: i % 3,
             key_threshold: None,
         })

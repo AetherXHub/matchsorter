@@ -9,7 +9,7 @@
 //! a query across all of its keys.
 
 use crate::options::MatchSorterOptions;
-use crate::ranking::{Ranking, get_match_ranking};
+use crate::ranking::{PreparedQuery, Ranking, get_match_ranking, get_match_ranking_prepared};
 
 /// Extract all string values from an item for a given key.
 ///
@@ -102,7 +102,7 @@ pub fn get_highest_ranking<T>(
 
     for key in keys {
         let values = key.extract(item);
-        let threshold = key.threshold.clone();
+        let threshold = key.threshold;
         let min = key.min_ranking_value();
         let max = key.max_ranking_value();
 
@@ -111,14 +111,14 @@ pub fn get_highest_ranking<T>(
 
             // Clamp down: if the rank exceeds the key's max_ranking, cap it.
             if rank > *max {
-                rank = max.clone();
+                rank = *max;
             }
 
             // Promote up: if the rank is below the key's min_ranking AND the
             // rank is NOT NoMatch, boost it to min_ranking. NoMatch is never
             // promoted -- an item that doesn't match stays unmatched.
             if rank < *min && rank != Ranking::NoMatch {
-                rank = min.clone();
+                rank = *min;
             }
 
             // Update best: strictly better rank wins, or equal rank with a
@@ -130,7 +130,68 @@ pub fn get_highest_ranking<T>(
                     rank,
                     ranked_value: value.clone(),
                     key_index,
-                    key_threshold: threshold.clone(),
+                    key_threshold: threshold,
+                };
+            }
+
+            key_index += 1;
+        }
+    }
+
+    best
+}
+
+/// Evaluate all keys for a single item using pre-prepared query data.
+///
+/// Same logic as [`get_highest_ranking`] but avoids redundant query preparation
+/// by accepting a [`PreparedQuery`], a reusable candidate buffer, and an
+/// optional SIMD substring finder.
+pub(crate) fn get_highest_ranking_prepared<T>(
+    item: &T,
+    keys: &[Key<T>],
+    pq: &PreparedQuery,
+    options: &MatchSorterOptions<T>,
+    candidate_buf: &mut String,
+    finder: Option<&memchr::memmem::Finder<'_>>,
+) -> RankingInfo {
+    let mut best = RankingInfo {
+        rank: Ranking::NoMatch,
+        ranked_value: String::new(),
+        key_index: 0,
+        key_threshold: None,
+    };
+
+    let mut key_index: usize = 0;
+
+    for key in keys {
+        let values = key.extract(item);
+        let threshold = key.threshold;
+        let min = key.min_ranking_value();
+        let max = key.max_ranking_value();
+
+        for value in &values {
+            let mut rank = get_match_ranking_prepared(
+                value,
+                pq,
+                options.keep_diacritics,
+                candidate_buf,
+                finder,
+            );
+
+            if rank > *max {
+                rank = *max;
+            }
+
+            if rank < *min && rank != Ranking::NoMatch {
+                rank = *min;
+            }
+
+            if rank > best.rank {
+                best = RankingInfo {
+                    rank,
+                    ranked_value: value.clone(),
+                    key_index,
+                    key_threshold: threshold,
                 };
             }
 

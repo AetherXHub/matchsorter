@@ -36,7 +36,7 @@ use unicode_normalization::char::is_combining_mark;
 /// `Ranking` implements [`PartialOrd`] such that higher-quality matches compare
 /// as greater. For two `Matches` variants, the one with the higher sub-score
 /// is greater.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Ranking {
     /// Exact byte-for-byte match (tier 7).
     CaseSensitiveEqual,
@@ -315,6 +315,174 @@ pub fn prepare_value_for_comparison(s: &str, keep_diacritics: bool) -> Cow<'_, s
     }
 }
 
+/// Pre-computed query data for amortizing repeated per-item ranking calls.
+///
+/// Caches the prepared (diacritics-stripped) query, its lowercased form,
+/// character count, and an ASCII flag so that `match_sorter` can avoid
+/// redundant work when ranking thousands of candidates against the same query.
+///
+/// Constructed once before the ranking loop via [`PreparedQuery::new`] and
+/// passed by reference to [`get_match_ranking_prepared`].
+pub(crate) struct PreparedQuery {
+    /// The query after optional diacritics stripping.
+    prepared: String,
+    /// Lowercased version of the prepared query.
+    pub(crate) lower: String,
+    /// Character count of the lowercased query (cached to avoid repeated
+    /// `.chars().count()` calls).
+    char_count: usize,
+}
+
+impl PreparedQuery {
+    /// Create a new `PreparedQuery` by preparing and lowercasing the query once.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The raw search query string
+    /// * `keep_diacritics` - If `true`, skip diacritics stripping
+    pub(crate) fn new(query: &str, keep_diacritics: bool) -> Self {
+        let prepared = prepare_value_for_comparison(query, keep_diacritics).into_owned();
+        let lower = prepared.to_lowercase();
+        // ASCII fast path: byte length equals character count for ASCII strings.
+        let char_count = if lower.is_ascii() {
+            lower.len()
+        } else {
+            lower.chars().count()
+        };
+        Self {
+            prepared,
+            lower,
+            char_count,
+        }
+    }
+}
+
+/// Lowercase `s` into `buf`, reusing the buffer's allocation.
+///
+/// When `s` is ASCII, uses a byte-level fast path that avoids Unicode
+/// case-mapping tables entirely. For non-ASCII input, falls back to
+/// `char::to_lowercase()`.
+fn lowercase_into(s: &str, buf: &mut String) {
+    buf.clear();
+    if s.is_ascii() {
+        buf.reserve(s.len());
+        // ASCII bytes are single-byte UTF-8, so lowercasing byte-by-byte
+        // and casting to char is safe and avoids Unicode lookup tables.
+        buf.extend(s.as_bytes().iter().map(|&b| b.to_ascii_lowercase() as char));
+    } else {
+        buf.reserve(s.len());
+        for c in s.chars() {
+            for lc in c.to_lowercase() {
+                buf.push(lc);
+            }
+        }
+    }
+}
+
+/// Inner hot-path ranking function using pre-prepared query data and a
+/// reusable candidate buffer.
+///
+/// This avoids redundant query preparation, lowercasing, and allocation
+/// when called repeatedly in a loop (e.g., inside `match_sorter`).
+///
+/// # Arguments
+///
+/// * `test_string` - The candidate string being evaluated
+/// * `pq` - Pre-computed query data
+/// * `keep_diacritics` - If `true`, skip diacritics stripping on the candidate
+/// * `candidate_buf` - Reusable buffer for lowercasing the candidate
+/// * `finder` - SIMD-accelerated substring searcher for the lowercased query,
+///   or `None` when the query is empty (since `memmem` panics on empty needles)
+pub(crate) fn get_match_ranking_prepared(
+    test_string: &str,
+    pq: &PreparedQuery,
+    keep_diacritics: bool,
+    candidate_buf: &mut String,
+    finder: Option<&memchr::memmem::Finder<'_>>,
+) -> Ranking {
+    // Prepare candidate (strip diacritics if requested).
+    let candidate = prepare_value_for_comparison(test_string, keep_diacritics);
+
+    // Step 1: If query has more characters than candidate, no match is possible.
+    // ASCII fast path: byte length equals character count for ASCII strings.
+    let candidate_char_count = if candidate.is_ascii() {
+        candidate.len()
+    } else {
+        candidate.chars().count()
+    };
+    if pq.char_count > candidate_char_count {
+        return Ranking::NoMatch;
+    }
+
+    // Step 2: Case-sensitive exact equality on the prepared strings.
+    if *candidate == *pq.prepared {
+        return Ranking::CaseSensitiveEqual;
+    }
+
+    // Step 3: Lowercase candidate into reusable buffer (avoids allocation).
+    lowercase_into(&candidate, candidate_buf);
+
+    // Steps 4-8: Substring search.
+    if let Some(finder) = finder {
+        // Use SIMD-accelerated memmem for substring search.
+        let candidate_bytes = candidate_buf.as_bytes();
+        let mut iter = finder.find_iter(candidate_bytes);
+
+        if let Some(first) = iter.next() {
+            if first == 0 {
+                // Step 5: Substring at byte position 0 with equal byte
+                // lengths means the lowercased strings are identical -> Equal.
+                if candidate_buf.len() == pq.lower.len() {
+                    return Ranking::Equal;
+                }
+                // Step 6: Starts with query but is longer -> StartsWith.
+                return Ranking::StartsWith;
+            }
+
+            // Step 7: Check if any match position sits at a word boundary.
+            // A word boundary means the byte immediately before the match
+            // is a space (0x20). We already know first > 0 here.
+            if candidate_bytes[first - 1] == b' ' {
+                return Ranking::WordStartsWith;
+            }
+            // Check remaining match positions lazily.
+            for pos in iter {
+                if pos > 0 && candidate_bytes[pos - 1] == b' ' {
+                    return Ranking::WordStartsWith;
+                }
+            }
+
+            // Step 8: A substring match exists but not at a word boundary.
+            return Ranking::Contains;
+        }
+    } else {
+        // Empty query: always found at position 0.
+        if candidate_buf.is_empty() {
+            // Both are empty after lowercasing -> Equal.
+            return Ranking::Equal;
+        }
+        return Ranking::StartsWith;
+    }
+
+    // No substring match found. Continue to acronym and fuzzy matching.
+
+    // Step 9: Single-character query that was not found as a substring cannot
+    // match via acronym or fuzzy.
+    if pq.char_count == 1 {
+        return Ranking::NoMatch;
+    }
+
+    // Step 10: Compute acronym of the lowercased candidate. If the acronym
+    // contains the lowercased query as a substring, it is an acronym match.
+    let acronym = get_acronym(candidate_buf);
+    if acronym.contains(&pq.lower) {
+        return Ranking::Acronym;
+    }
+
+    // Step 11: Attempt fuzzy closeness ranking on the lowercased strings.
+    get_closeness_ranking(candidate_buf, &pq.lower)
+}
+
 /// Determine how well a candidate string matches a search query.
 ///
 /// Implements an 11-step algorithm that classifies the match into one of the
@@ -350,79 +518,15 @@ pub fn get_match_ranking(
     string_to_rank: &str,
     keep_diacritics: bool,
 ) -> Ranking {
-    // Prepare both strings (strip diacritics if requested).
-    let candidate = prepare_value_for_comparison(test_string, keep_diacritics);
-    let query = prepare_value_for_comparison(string_to_rank, keep_diacritics);
-
-    // Step 1: If query has more characters than candidate, no match is possible.
-    // Compare CHARACTER counts, not byte counts, for Unicode correctness.
-    if query.chars().count() > candidate.chars().count() {
-        return Ranking::NoMatch;
-    }
-
-    // Step 2: Case-sensitive exact equality on the prepared strings.
-    if *candidate == *query {
-        return Ranking::CaseSensitiveEqual;
-    }
-
-    // Step 3: Lowercase both strings for all remaining comparisons.
-    let candidate_lower = candidate.to_lowercase();
-    let query_lower = query.to_lowercase();
-
-    // Step 4: Find all byte-position indexes where `query` appears in `candidate`
-    // as a substring. Uses a lazy iterator via `str::match_indices`.
-    let mut indexes = candidate_lower
-        .match_indices(&query_lower)
-        .map(|(pos, _)| pos);
-
-    let first_index = indexes.next();
-
-    // Steps 5-8: Check substring-based tiers.
-    if let Some(first) = first_index {
-        if first == 0 {
-            // Step 5: Substring at position 0 with equal lengths -> Equal.
-            if candidate_lower.len() == query_lower.len() {
-                return Ranking::Equal;
-            }
-            // Step 6: Substring at position 0 but different lengths -> StartsWith.
-            return Ranking::StartsWith;
-        }
-
-        // Step 7: Check if any match position (including the first) sits at a
-        // word boundary. A word boundary means the byte immediately before the
-        // match position is a space (0x20). We already know first > 0 here.
-        if candidate_lower.as_bytes()[first - 1] == b' ' {
-            return Ranking::WordStartsWith;
-        }
-        // Check remaining match positions lazily.
-        for pos in indexes {
-            if pos > 0 && candidate_lower.as_bytes()[pos - 1] == b' ' {
-                return Ranking::WordStartsWith;
-            }
-        }
-
-        // Step 8: A substring match exists but not at position 0 and not at a
-        // word boundary -> Contains.
-        return Ranking::Contains;
-    }
-
-    // No substring match found. Continue to acronym and fuzzy matching.
-
-    // Step 9: Single-character query that was not found as a substring cannot
-    // match via acronym or fuzzy. Compare CHARACTER count, not byte count.
-    if query_lower.chars().count() == 1 {
-        return Ranking::NoMatch;
-    }
-
-    // Step 10: Compute acronym of the lowercased candidate. If the acronym
-    // contains the lowercased query as a substring, it is an acronym match.
-    let acronym = get_acronym(&candidate_lower);
-    if acronym.contains(&query_lower) {
-        return Ranking::Acronym;
-    }
-
-    // Step 11: Attempt fuzzy closeness ranking on the lowercased strings.
-    get_closeness_ranking(&candidate_lower, &query_lower)
+    // Thin wrapper: construct a PreparedQuery for one-off calls.
+    let pq = PreparedQuery::new(string_to_rank, keep_diacritics);
+    let finder = if pq.lower.is_empty() {
+        None
+    } else {
+        Some(memchr::memmem::Finder::new(pq.lower.as_bytes()))
+    };
+    let mut buf = String::new();
+    get_match_ranking_prepared(test_string, &pq, keep_diacritics, &mut buf, finder.as_ref())
 }
 
 #[cfg(test)]
@@ -492,14 +596,14 @@ mod tests {
     }
 
     #[test]
-    fn clone_produces_equal_value() {
+    fn copy_produces_equal_value() {
         let original = Ranking::Matches(1.75);
-        let cloned = original.clone();
-        assert_eq!(original, cloned);
+        let copied = original;
+        assert_eq!(original, copied);
 
         let original = Ranking::Contains;
-        let cloned = original.clone();
-        assert_eq!(original, cloned);
+        let copied = original;
+        assert_eq!(original, copied);
     }
 
     #[test]

@@ -26,6 +26,7 @@ use crate::options::RankedItem;
 /// # Examples
 ///
 /// ```
+/// use std::borrow::Cow;
 /// use matchsorter::{RankedItem, Ranking, default_base_sort};
 /// use std::cmp::Ordering;
 ///
@@ -36,7 +37,7 @@ use crate::options::RankedItem;
 ///     item: &item_a,
 ///     index: 0,
 ///     rank: Ranking::Equal,
-///     ranked_value: "apple".to_owned(),
+///     ranked_value: Cow::Borrowed("apple"),
 ///     key_index: 0,
 ///     key_threshold: None,
 /// };
@@ -44,7 +45,7 @@ use crate::options::RankedItem;
 ///     item: &item_b,
 ///     index: 1,
 ///     rank: Ranking::Equal,
-///     ranked_value: "banana".to_owned(),
+///     ranked_value: Cow::Borrowed("banana"),
 ///     key_index: 0,
 ///     key_threshold: None,
 /// };
@@ -79,6 +80,7 @@ pub fn default_base_sort<T>(a: &RankedItem<T>, b: &RankedItem<T>) -> Ordering {
 /// # Examples
 ///
 /// ```
+/// use std::borrow::Cow;
 /// use matchsorter::{RankedItem, Ranking, sort_ranked_values, default_base_sort};
 /// use std::cmp::Ordering;
 ///
@@ -88,7 +90,7 @@ pub fn default_base_sort<T>(a: &RankedItem<T>, b: &RankedItem<T>) -> Ordering {
 ///     item: &items[0],
 ///     index: 0,
 ///     rank: Ranking::StartsWith,
-///     ranked_value: "alpha".to_owned(),
+///     ranked_value: Cow::Borrowed("alpha"),
 ///     key_index: 0,
 ///     key_threshold: None,
 /// };
@@ -96,7 +98,7 @@ pub fn default_base_sort<T>(a: &RankedItem<T>, b: &RankedItem<T>) -> Ordering {
 ///     item: &items[1],
 ///     index: 1,
 ///     rank: Ranking::Contains,
-///     ranked_value: "beta".to_owned(),
+///     ranked_value: Cow::Borrowed("beta"),
 ///     key_index: 0,
 ///     key_threshold: None,
 /// };
@@ -123,6 +125,8 @@ pub fn sort_ranked_values<T>(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::ranking::Ranking;
 
@@ -135,14 +139,14 @@ mod tests {
     /// only examine `rank`, `key_index`, and `ranked_value`.
     fn make_ranked(
         rank: Ranking,
-        ranked_value: &str,
+        ranked_value: &'static str,
         key_index: usize,
     ) -> RankedItem<'static, &'static str> {
         RankedItem {
             item: &ITEM,
             index: 0,
             rank,
-            ranked_value: ranked_value.to_owned(),
+            ranked_value: Cow::Borrowed(ranked_value),
             key_index,
             key_threshold: None,
         }
