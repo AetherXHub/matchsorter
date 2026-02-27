@@ -89,6 +89,37 @@
 //! assert_eq!(results.len(), 2);
 //! ```
 //!
+//! # Diacritics
+//!
+//! By default, diacritics are stripped before comparison so that `"cafe"`
+//! matches `"caf\u{00e9}"`:
+//!
+//! ```
+//! use matchsorter::{match_sorter, MatchSorterOptions};
+//!
+//! let items = ["cafe", "caf\u{00e9}", "coffee"];
+//! let results = match_sorter(&items, "cafe", MatchSorterOptions::default());
+//! // Both "cafe" and "cafe" (accented) match; "coffee" is dropped
+//! assert_eq!(results.len(), 2);
+//! assert_eq!(results[0], &"cafe");
+//! assert_eq!(results[1], &"caf\u{00e9}");
+//! ```
+//!
+//! Set `keep_diacritics: true` to require exact accent matching:
+//!
+//! ```
+//! use matchsorter::{match_sorter, MatchSorterOptions};
+//!
+//! let items = ["cafe", "caf\u{00e9}", "coffee"];
+//! let opts = MatchSorterOptions {
+//!     keep_diacritics: true,
+//!     ..Default::default()
+//! };
+//! let results = match_sorter(&items, "cafe", opts);
+//! // Only the unaccented "cafe" matches when diacritics are preserved
+//! assert_eq!(results, vec![&"cafe"]);
+//! ```
+//!
 //! # Feature Highlights
 //!
 //! - **8-tier ranking** from exact match to fuzzy character matching
